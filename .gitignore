@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+dist/
+build/
+.next/
+out/
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# AWS SAM
+.aws-sam/
+samconfig.toml # Optional: exclude if it contains sensitive data, but usually kept for deploy settings
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
