@@ -1,0 +1,243 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Blog Platform - Complete Backend
+
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Timeout: 10
+    MemorySize: 128
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref BlogDynamoDBTable
+        MEDIA_BUCKET_NAME: !Ref MediaBucket
+
+Resources:
+  # --- Database ---
+  BlogDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: BlogTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # --- Auth ---
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: BlogUserPool
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: email
+          Required: true
+          AttributeDataType: String
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: BlogAppClient
+      UserPoolId: !Ref UserPool
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  # --- Storage ---
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, HEAD]
+            AllowedOrigins: ['*']
+
+  # --- API ---
+  BlogApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors: "'*'"
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+
+  # --- Posts Functions ---
+  CreatePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../services/posts/
+      Handler: create.handler
+      Events:
+        CreatePost:
+          Type: Api
+          Properties:
+            Path: /posts
+            Method: post
+            RestApiId: !Ref BlogApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BlogDynamoDBTable
+
+  GetPostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../services/posts/
+      Handler: get.handler
+      Events:
+        GetPost:
+          Type: Api
+          Properties:
+            Path: /posts/{slug}
+            Method: get
+            RestApiId: !Ref BlogApi
+            Auth:
+              Authorizer: NONE
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BlogDynamoDBTable
+
+  ListPostsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../services/posts/
+      Handler: list.handler
+      Events:
+        ListPosts:
+          Type: Api
+          Properties:
+            Path: /posts
+            Method: get
+            RestApiId: !Ref BlogApi
+            Auth:
+              Authorizer: NONE
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BlogDynamoDBTable
+
+  UpdatePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../services/posts/
+      Handler: update.handler
+      Events:
+        UpdatePost:
+          Type: Api
+          Properties:
+            Path: /posts/{postId}
+            Method: put
+            RestApiId: !Ref BlogApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BlogDynamoDBTable
+
+  DeletePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../services/posts/
+      Handler: delete.handler
+      Events:
+        DeletePost:
+          Type: Api
+          Properties:
+            Path: /posts/{postId}
+            Method: delete
+            RestApiId: !Ref BlogApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BlogDynamoDBTable
+
+  # --- Comments Functions ---
+  AddCommentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../services/comments/
+      Handler: create.handler
+      Events:
+        AddComment:
+          Type: Api
+          Properties:
+            Path: /posts/{postId}/comments
+            Method: post
+            RestApiId: !Ref BlogApi
+            Auth:
+              Authorizer: NONE
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BlogDynamoDBTable
+
+  ListCommentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../services/comments/
+      Handler: list.handler
+      Events:
+        ListComments:
+          Type: Api
+          Properties:
+            Path: /posts/{postId}/comments
+            Method: get
+            RestApiId: !Ref BlogApi
+            Auth:
+              Authorizer: NONE
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BlogDynamoDBTable
+
+  # --- Uploads Function ---
+  GetUploadURLFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../services/uploads/
+      Handler: get_url.handler
+      Events:
+        GetUploadURL:
+          Type: Api
+          Properties:
+            Path: /upload-url
+            Method: get
+            RestApiId: !Ref BlogApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref MediaBucket
+
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${BlogApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
